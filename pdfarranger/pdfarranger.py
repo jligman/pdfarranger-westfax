@@ -125,6 +125,7 @@ from gi.repository import Pango
 
 from .config import Config
 from .core import Dims, Sides, _img_to_pdf, IMG2PDF_VERSION, POPPLER_VERSION
+from . import westfax
 
 PIKEPDF_VERSION = pikepdf.__version__
 LIBQPDF_VERSION = pikepdf.__libqpdf_version__
@@ -414,6 +415,43 @@ class PdfArranger(Gtk.Application):
             box.add(mb)
             self.window.add(box)
         self.window.set_default_icon_name(ICON_ID)
+
+        hb = self.uiXML.get_object("header_bar")
+
+        btn_send = Gtk.Button()
+        btn_send.set_tooltip_text("Send Fax")
+        btn_send.set_action_name("win.westfax-send")
+        btn_send.set_image(Gtk.Image.new_from_file(self.__resource_path("westfax_send.png")))
+
+        btn_settings = Gtk.Button()
+        btn_settings.set_tooltip_text("WestFax Login")
+
+        def _open_westfax_login(*_):
+            url = (self.config.data["preferences"].get("westfax_login_url") or "").strip()
+            if url:
+                Gtk.show_uri_on_window(self.window, url, Gtk.get_current_event_time())
+
+        btn_settings.connect("clicked", _open_westfax_login)
+
+        btn_settings.set_image(
+            Gtk.Image.new_from_file(self.__resource_path("westfax.png"))
+        )
+
+        group = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        group.get_style_context().add_class("linked")
+
+        group.pack_start(btn_send, False, False, 0)
+        group.pack_start(btn_settings, False, False, 0)
+
+        prefs = self.config.data['preferences']
+        pid = (prefs.get('westfax_product_id', '') or '').strip()
+
+        if not pid:
+            group.hide()
+
+        hb.pack_start(group)
+        hb.show_all()
+
         return b
 
     def __create_menus(self):
@@ -471,6 +509,8 @@ class PdfArranger(Gtk.Application):
             ("generate-booklet", self.generate_booklet),
             ("split-booklet", self.split_booklet),
             ("preferences", self.on_action_preferences),
+            ("westfax-settings", westfax.make_westfax_settings_handler(self)),
+            ("westfax-send", westfax.make_westfax_send_handler(self)),
             ("print", self.on_action_print),
             ("find", self.searchbar_widget.find),
             ("find_prev", self.searchbar_widget.find_prev),
