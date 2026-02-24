@@ -3,3 +3,22 @@ venv/
 tests/exporter/out.pdf
 build/
 pdfarranger.egg-info/
+
+# Visual Studio junk
+.vs/
+.vscode/
+*.suo
+*.user
+*.cache
+*.db
+*.opendb
+CopilotIndices/
+FineContentIndex/
+SemanticSymbols.db*
+CodeChunks.db*
+
+# Python junk
+__pycache__/
+*.pyc
+*.pyo
+.venv/
