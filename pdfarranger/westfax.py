@@ -1,7 +1,5 @@
 import gettext
-import json
 import base64
-from pathlib import Path
 from gi.repository import Gtk
 
 _ = gettext.gettext
@@ -12,17 +10,10 @@ def make_westfax_settings_handler(app):
         prefs = app.config.data['preferences']
 
         username = prefs.get('westfax_username', '') or ''
-        password = prefs.get('westfax_password', '') or ''
+        password = deobf(prefs.get('westfax_password', '') or '')
         product_id = prefs.get('westfax_product_id', '') or ''
         login_url = prefs.get('westfax_login_url', '') or ''
-
-        config = load_westfax_config()
-        if config:
-            username = config["username"]
-            password = config["password"]
-            product_id = config["product_id"]
-            login_url = config["login_url"]
-
+        
         d = Gtk.Dialog(
             title=_("WestFax Settings"),
             parent=app.window,
@@ -61,10 +52,8 @@ def make_westfax_settings_handler(app):
             product_id_val = entry_product_id.get_text().strip()
             login_url_val = entry_login.get_text().strip()
 
-            save_westfax_config(username_val, password_val, product_id_val, login_url_val)
-
             prefs['westfax_username'] = username_val
-            prefs['westfax_password'] = password_val
+            prefs['westfax_password'] = obf(password_val)
             prefs['westfax_product_id'] = product_id_val
             prefs['westfax_login_url'] = login_url_val
 
@@ -77,42 +66,18 @@ def make_westfax_settings_handler(app):
 
     return handler
 
-CONFIG_PATH = Path.home() / ".pdfarranger_westfax.json"
+def obf(s: str) -> str:
+    if not s:
+        return ""
+    return base64.b64encode(s.encode("utf-8")).decode("ascii")
 
-
-def encode_password(password: str) -> str:
-    return base64.b64encode(password.encode()).decode()
-
-
-def decode_password(encoded: str) -> str:
-    return base64.b64decode(encoded.encode()).decode()
-
-
-def save_westfax_config(username, password, product_id, login_url):
-    data = {
-        "username": username,
-        "password": encode_password(password),
-        "product_id": product_id,
-        "login_url": login_url
-    }
-
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(data, f, indent=2)
-
-
-def load_westfax_config():
-    if not CONFIG_PATH.exists():
-        return None
-
-    with open(CONFIG_PATH, "r") as f:
-        data = json.load(f)
-
-    return {
-        "username": data.get("username", ""),
-        "password": decode_password(data.get("password", "")),
-        "product_id": data.get("product_id", ""),
-        "login_url": data.get("login_url", "")
-    }
+def deobf(s: str) -> str:
+    if not s:
+        return ""
+    try:
+        return base64.b64decode(s.encode("ascii")).decode("utf-8")
+    except Exception:
+        return s
 
 def make_westfax_send_handler(app):
     def handler(_action, _option=None, _unknown=None):
