@@ -2577,6 +2577,8 @@ class PdfArranger(Gtk.Application):
     def iv_selection_changed(self, move_cursor_event=False):
         selection = self.iconview.get_selected_items()
         ne = len(selection) > 0
+        has_doc = len(self.model) > 0
+
         for a, e in [
             ("reverse-order", self.reverse_order_available(selection)),
             ("delete", ne),
@@ -2597,8 +2599,11 @@ class PdfArranger(Gtk.Application):
             ("crop-white-borders", ne),
             ("generate-booklet", ne),
             ("split-booklet", ne),
+
+            ("westfax-send", has_doc),
         ]:
             self.window.lookup_action(a).set_enabled(e)
+
         self.update_statusbar()
         if selection and not move_cursor_event:
             self.iv_cursor.cursor_is_visible = False
