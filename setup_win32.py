@@ -12,6 +12,10 @@ include_files = [
     ('data/menu.ui', 'share/pdfarranger/menu.ui'),
     ('data/icons/hicolor/scalable', 'share/icons/hicolor/scalable'),
     ('build/mo', 'share/locale'),
+
+    # WestFax toolbar icons (your custom ones)
+    ('data/westfax.png', 'share/pdfarranger/westfax.png'),
+    ('data/westfax_send.png', 'share/pdfarranger/westfax_send.png'),
 ]
 
 
@@ -145,7 +149,17 @@ include_files.append((from_path, to_path))
 
 
 build_options = dict(
-    packages=['gi', 'packaging', 'pikepdf'],
+    packages=[
+        'gi',
+        'packaging',
+        'pikepdf',
+        'keyboard',
+        'requests',
+        'urllib3',
+        'idna',
+        'charset_normalizer',
+        'certifi',
+    ],
     excludes=['tkinter', 'test'],
     include_files=include_files,
 )
@@ -202,7 +216,7 @@ setup(name='PDF Arranger',
       cmdclass={'bdist_zip': bdist_zip},
       packages=['pdfarranger'],
       executables=[Executable('pdfarranger/__main__.py',
-                              base='Win32GUI' if sys.platform == 'win32' else None,
+                              base='gui' if sys.platform == 'win32' else None,
                               target_name='pdfarranger.exe',
                               icon='data/pdfarranger.ico',
                               shortcut_name='PDF Arranger',

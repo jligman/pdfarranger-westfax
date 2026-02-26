@@ -1,0 +1,12 @@
+Metadata-Version: 2.4
+Name: PDF-Arranger
+Version: 1.13.0
+Summary: PDF Arranger
+Author: The PDF Arranger team
+License-File: COPYING
+Dynamic: author
+Dynamic: description
+Dynamic: license-file
+Dynamic: summary
+
+A simple application for PDF Merging, Rearranging, and Splitting

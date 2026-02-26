@@ -1,0 +1,11 @@
+COPYING
+README.md
+setup.py
+setup_win32.py
+PDF_Arranger.egg-info/PKG-INFO
+PDF_Arranger.egg-info/SOURCES.txt
+PDF_Arranger.egg-info/dependency_links.txt
+PDF_Arranger.egg-info/top_level.txt
+tests/test.py
+tests/test_core.py
+tests/test_exporter.py
