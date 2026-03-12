@@ -22,3 +22,4 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+/dist/pdfarranger-1.13.0-windows-portable.zip
