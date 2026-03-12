@@ -20,11 +20,16 @@ include_files = [
 
 
 def clean_build():
+    if not os.path.isdir('build'):
+        return
+
     dirs = os.listdir('build')
     keep = ['mo', 'lib']
     for d in dirs:
         if d not in keep:
-            shutil.rmtree(os.path.join('build', d))
+            path = os.path.join('build', d)
+            if os.path.isdir(path):
+                shutil.rmtree(path)
 
 
 clean_build()
@@ -39,6 +44,9 @@ def addfile(relpath, warn_missing=False):
 
 
 def addlocale(name):
+    if not os.path.isdir('build/mo'):
+        return
+
     langs = os.listdir('build/mo')
     for path in glob.glob(os.path.join(sys.prefix,
                                        "share/locale/*/LC_MESSAGES/{}.mo".format(name))):
