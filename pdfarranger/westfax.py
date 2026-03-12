@@ -7,6 +7,8 @@ WestFax integration helpers for PDF Arranger.
 """
 import base64
 import os
+import html
+import json
 import re
 import tempfile
 import gettext
@@ -20,6 +22,7 @@ _ = gettext.gettext
 WESTFAX_SEND_URL = "https://api2.westfax.com/REST/Fax_SendFax/json"
 WESTFAX_CONTACTS_URL = "https://api2.westfax.com/REST/Contact_GetContactList/json"
 WESTFAX_USERINFO_URL = "https://api2.westfax.com/REST/Security_GetUserInfo/json"
+WESTFAX_COVERPAGES_URL = "https://api2.westfax.com/REST/Fax_GetCoverPages/json"
 
 
 def make_westfax_settings_handler(app):
@@ -94,7 +97,6 @@ def make_westfax_settings_handler(app):
 def make_westfax_send_handler(app):
     """Return a handler that shows the Send Fax dialog and performs the API call."""
     def handler(_action, _option=None, _unknown=None):
-        # 1) Ask for destination fax number
         d = Gtk.Dialog(
             title=_("Send Fax"),
             parent=app.window,
@@ -105,6 +107,7 @@ def make_westfax_send_handler(app):
         d.set_resizable(False)
 
         grid = Gtk.Grid(row_spacing=6, column_spacing=12, border_width=12, margin=8)
+
         grid.attach(Gtk.Label(label=_("Destination Fax Number:"), halign=Gtk.Align.START), 0, 0, 1, 1)
         entry_to = Gtk.Entry()
         entry_to.set_placeholder_text("+1##########")
@@ -113,21 +116,81 @@ def make_westfax_send_handler(app):
         btn_lookup = Gtk.Button(label=_("Lookup..."))
         grid.attach(btn_lookup, 2, 0, 1, 1)
 
-        grid.attach(Gtk.Label(label=_("Subject:"), halign=Gtk.Align.START), 0, 1, 1, 1)
+        grid.attach(Gtk.Label(label=_("Recipient:"), halign=Gtk.Align.START), 0, 1, 1, 1)
+        entry_recipient = Gtk.Entry()
+        entry_recipient.set_placeholder_text(_("Recipient name"))
+        grid.attach(entry_recipient, 1, 1, 2, 1)
+
+        grid.attach(Gtk.Label(label=_("Company:"), halign=Gtk.Align.START), 0, 2, 1, 1)
+        entry_company = Gtk.Entry()
+        entry_company.set_placeholder_text(_("Company name"))
+        grid.attach(entry_company, 1, 2, 2, 1)
+
+        grid.attach(Gtk.Label(label=_("Cover Sheet:"), halign=Gtk.Align.START), 0, 3, 1, 1)
+        combo_cover = Gtk.ComboBoxText()
+        grid.attach(combo_cover, 1, 3, 2, 1)
+
+        grid.attach(Gtk.Label(label=_("Subject:"), halign=Gtk.Align.START), 0, 4, 1, 1)
         entry_subject = Gtk.Entry()
         entry_subject.set_placeholder_text(_("Subject / Job name"))
-        grid.attach(entry_subject, 1, 1, 1, 1)
+        grid.attach(entry_subject, 1, 4, 2, 1)
 
-        grid.attach(Gtk.Label(label=_("Reference:"), halign=Gtk.Align.START), 0, 2, 1, 1)
+        grid.attach(Gtk.Label(label=_("Reference:"), halign=Gtk.Align.START), 0, 5, 1, 1)
         entry_ref = Gtk.Entry()
         entry_ref.set_placeholder_text(_("Reference / Billing code"))
-        grid.attach(entry_ref, 1, 2, 1, 1)
+        grid.attach(entry_ref, 1, 5, 2, 1)
+
+        grid.attach(Gtk.Label(label=_("Message:"), halign=Gtk.Align.START), 0, 6, 1, 1)
+
+        message_scroll = Gtk.ScrolledWindow()
+        message_scroll.set_min_content_height(100)
+        message_scroll.set_hexpand(True)
+        message_scroll.set_vexpand(False)
+
+        text_message = Gtk.TextView()
+        text_message.set_wrap_mode(Gtk.WrapMode.WORD)
+        text_message.set_accepts_tab(False)
+
+        message_scroll.add(text_message)
+        grid.attach(message_scroll, 1, 6, 2, 1)
 
         chk_receipt = Gtk.CheckButton(label=_("Send Delivery Receipt"))
         chk_receipt.set_active(True)
-        grid.attach(chk_receipt, 1, 3, 2, 1)
+        grid.attach(chk_receipt, 1, 7, 2, 1)
 
-        d.vbox.pack_start(grid, True, True, 0)
+        d.vbox.pack_start(grid, True, True, 0)        
+
+        # load cover pages here
+        prefs = app.config.data['preferences']
+        username = (prefs.get('westfax_username', '') or '').strip()
+        password = _deobf(prefs.get('westfax_password', '') or '')
+        product_id = (prefs.get('westfax_product_id', '') or '').strip()
+
+        cover_count = 0
+
+        if username and password and product_id:
+            try:
+                resp = westfax_get_cover_pages(username, password, product_id)
+                if isinstance(resp, dict) and resp.get("Success"):
+                    for cp in (resp.get("Result") or []):
+                        if not isinstance(cp, dict):
+                            continue
+
+                        cp_id = (cp.get("Id") or "").strip()
+                        cp_name = (cp.get("Name") or "").strip()
+
+                        if cp_id and cp_name:
+                            combo_cover.append(cp_id, cp_name)
+                            cover_count += 1
+            except Exception:
+                pass
+
+        combo_cover.append("", _("No Cover Sheet"))
+
+        if cover_count > 0:
+            combo_cover.set_active(0)
+        else:
+            combo_cover.set_active_id("")
 
         def _lookup_clicked(_btn):
             prefs = app.config.data['preferences']
@@ -158,21 +221,23 @@ def make_westfax_send_handler(app):
             search.set_placeholder_text(_("Search (first, last, company, fax)..."))
             vbox.pack_start(search, False, False, 6)
 
-            # Data model: First, Last, Company, Fax
             store = Gtk.ListStore(str, str, str, str)
 
-            def refill(filter_text: str = ""):
+            def refill(filter_text=""):
                 store.clear()
                 q = (filter_text or "").strip().lower()
                 for c in contacts:
                     if not isinstance(c, dict):
                         continue
+
                     first = (c.get("FirstName") or "").strip()
                     last = (c.get("LastName") or "").strip()
                     company = (c.get("CompanyName") or "").strip()
                     fax = (c.get("Fax") or "").strip()
+
                     if not fax:
                         continue
+
                     haystack = f"{first} {last} {company} {fax}".lower()
                     if not q or q in haystack:
                         store.append([first, last, company, fax])
@@ -181,11 +246,7 @@ def make_westfax_send_handler(app):
             search.connect("changed", lambda e: refill(e.get_text()))
 
             tree = Gtk.TreeView(model=store)
-
-            def on_row_activated(_tree, _path, _column):
-                dlg.response(Gtk.ResponseType.OK)
-
-            tree.connect("row-activated", on_row_activated)
+            tree.connect("row-activated", lambda *_: dlg.response(Gtk.ResponseType.OK))
 
             tree.append_column(Gtk.TreeViewColumn(_("First"), Gtk.CellRendererText(), text=0))
             tree.append_column(Gtk.TreeViewColumn(_("Last"), Gtk.CellRendererText(), text=1))
@@ -201,18 +262,26 @@ def make_westfax_send_handler(app):
             dlg.show_all()
             search.grab_focus()
 
-            # Make sure GTK has computed column sizes
             while Gtk.events_pending():
                 Gtk.main_iteration()
 
             total_cols = sum(col.get_width() for col in tree.get_columns())
-            pad = 80
-            dlg.resize(total_cols + pad, 420)
+            dlg.resize(total_cols + 80, 420)
 
             if dlg.run() == Gtk.ResponseType.OK:
                 model, it = tree.get_selection().get_selected()
                 if it:
-                    entry_to.set_text(model[it][3])
+                    first = (model[it][0] or "").strip()
+                    last = (model[it][1] or "").strip()
+                    company = (model[it][2] or "").strip()
+                    fax = (model[it][3] or "").strip()
+
+                    recipient = f"{first} {last}".strip()
+
+                    entry_to.set_text(fax)
+                    entry_recipient.set_text(recipient)
+                    entry_company.set_text(company)
+
             dlg.destroy()
 
         btn_lookup.connect("clicked", _lookup_clicked)
@@ -224,15 +293,26 @@ def make_westfax_send_handler(app):
             d.destroy()
             return
 
-        to_number = entry_to.get_text().strip()
-        to_number = re.sub(r"\D", "", to_number)
+        to_number = re.sub(r"\D", "", entry_to.get_text().strip())
+        recipient = entry_recipient.get_text().strip()
+        company = entry_company.get_text().strip()
+        cover_page_id = combo_cover.get_active_id() or ""
+        job_name = entry_subject.get_text().strip() or ""
+        billing_code = entry_ref.get_text().strip() or ""
+
+        message_buffer = text_message.get_buffer()
+        message = message_buffer.get_text(
+            message_buffer.get_start_iter(),
+            message_buffer.get_end_iter(),
+            True
+        ).strip()
+
+        send_receipt = chk_receipt.get_active()
+        d.destroy()
+
         if not re.fullmatch(r"\d{7,20}", to_number):
             app.error_message_dialog(_("Invalid fax number. Use digits only (e.g. 2105551234)."))
             return
-        job_name = entry_subject.get_text().strip() or ""
-        billing_code = entry_ref.get_text().strip() or ""
-        send_receipt = chk_receipt.get_active()
-        d.destroy()
 
         if not _validate_phone(to_number):
             app.error_message_dialog(_("Invalid fax number. Use digits, optionally starting with +."))
@@ -245,11 +325,6 @@ def make_westfax_send_handler(app):
             app.error_message_dialog(_("Fax number is not set. Open WestFax Settings."))
             return
 
-        ani = re.sub(r"\D", "", ani)
-        if not re.fullmatch(r"\d{7,20}", ani):
-            app.error_message_dialog(_("Invalid ANI. Use digits only (e.g. 2105551234)."))
-            return
-
         pdf_path = app.save_file or (app.pdfqueue[0].filename if app.pdfqueue else None)
         if not pdf_path or not os.path.exists(pdf_path):
             app.error_message_dialog(_("No saved PDF to fax. Please save the document first."))
@@ -257,6 +332,7 @@ def make_westfax_send_handler(app):
 
         fd, tmp_pdf = tempfile.mkstemp(suffix=".pdf", prefix="westfax_", dir=app.tmp_dir)
         os.close(fd)
+
         try:
             with open(pdf_path, "rb") as src, open(tmp_pdf, "wb") as dst:
                 while True:
@@ -265,7 +341,6 @@ def make_westfax_send_handler(app):
                         break
                     dst.write(buf)
 
-            prefs = app.config.data['preferences']
             username = (prefs.get('westfax_username', '') or '').strip()
             password = _deobf(prefs.get('westfax_password', '') or '')
             product_id = (prefs.get('westfax_product_id', '') or '').strip()
@@ -283,6 +358,18 @@ def make_westfax_send_handler(app):
                         except Exception:
                             pass
 
+                sender_name = ""
+
+                if cover_page_id:
+                    info = westfax_get_user_info(username, password, product_id)
+                    if not isinstance(info, dict) or not info.get("Success"):
+                        raise Exception(info.get("ErrorString") or info.get("InfoString") or "Failed to get user info.")
+
+                    result = info.get("Result") or {}
+                    first = (result.get("FirstName") or "").strip()
+                    last = (result.get("LastName") or "").strip()
+                    sender_name = f"{first} {last}".strip()                    
+
                 result = westfax_send_fax(
                     username=username,
                     password=password,
@@ -292,6 +379,11 @@ def make_westfax_send_handler(app):
                     pdf_path=tmp_pdf,
                     job_name=job_name,
                     billing_code=billing_code,
+                    recipient=recipient,
+                    company=company,
+                    message=message,
+                    cover_page_id=cover_page_id,
+                    sender_name=sender_name,
                     header=header,
                     feedback_email=feedback_email,
                 )
@@ -391,11 +483,9 @@ def show_westfax_result_dialog(parent, to_number, job_name, result, error=None):
 
 
 def westfax_send_fax(username, password, product_id, ani, to_number, pdf_path,
-                     job_name, billing_code, header="", feedback_email=None):
-    """
-    Send fax via WestFax REST endpoint. Returns parsed JSON on success.
-    Raises requests.RequestException or ValueError on non-JSON response.
-    """
+                     job_name, billing_code, header="", feedback_email=None,
+                     cover_page_id="", sender_name="", recipient="",
+                     company="", message=""):
     data = {
         "Username": username,
         "Password": password,
@@ -408,8 +498,53 @@ def westfax_send_fax(username, password, product_id, ani, to_number, pdf_path,
         "ANI": ani,
         "StartDate": "1/1/1999",
     }
+
     if feedback_email:
         data["FeedbackEmail"] = feedback_email
+
+    method_params = []
+
+    if cover_page_id:
+        method_params.append({"Name": "coverPageId", "Value": cover_page_id})
+
+        if sender_name:
+            method_params.append({
+                "Name": "coverPageSenderName",
+                "Value": sender_name
+            })
+
+        if recipient:
+            method_params.append({
+                "Name": "coverPageRecipientName",
+                "Value": recipient
+            })
+
+        if company:
+            method_params.append({
+                "Name": "coverPageRecipientCompany",
+                "Value": company
+            })
+
+        if to_number:
+            method_params.append({
+                "Name": "coverPageRecipientFax",
+                "Value": to_number
+            })
+
+        if message:
+            method_params.append({
+                "Name": "coverPageMessage",
+                "Value": html.escape(message)
+            })
+
+        if job_name:
+            method_params.append({
+                "Name": "coverPageSubject",
+                "Value": html.escape(job_name)
+            })
+
+    for i, mp in enumerate(method_params, start=1):
+        data[f"MethodParams{i}"] = json.dumps(mp)
 
     with open(pdf_path, "rb") as f:
         files = {"Files0": (os.path.basename(pdf_path), f, "application/pdf")}
@@ -470,3 +605,14 @@ def _validate_phone(num: Optional[str]) -> bool:
     if not num:
         return False
     return bool(re.fullmatch(r"\+?\d{7,20}", num))
+
+def westfax_get_cover_pages(username, password, product_id):
+    data = {
+        "Username": username,
+        "Password": password,
+        "Cookies": "false",
+        "ProductId": product_id,
+    }
+    r = requests.post(WESTFAX_COVERPAGES_URL, data=data, timeout=30)
+    r.raise_for_status()
+    return r.json()
